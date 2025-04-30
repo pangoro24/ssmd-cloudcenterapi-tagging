@@ -1,0 +1,68 @@
+schemaVersion: '0.3'
+description: Aplica el tag 'deleteAt' a todas las instancias EC2 y buckets S3 de la cuenta usando CloudControl API
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  deleteAt:
+    type: String
+    description: Valor del tag deleteAt
+  AutomationAssumeRole:
+    type: String
+    description: Role que asume el documento para ejecutar acciones
+mainSteps:
+  - name: ListEC2Instances
+    action: aws:executeAwsApi
+    inputs:
+      Service: ec2
+      Api: DescribeInstances
+    outputs:
+      - Name: instanceIds
+        Selector: '$.Reservations[*].Instances[*].InstanceId'
+        Type: StringList
+
+  - name: TagAllEC2Instances
+    action: aws:forEach
+    inputs:
+      IterationSource: '{{ ListEC2Instances.instanceIds }}'
+      Steps:
+        - name: TagEC2
+          action: aws:executeAwsApi
+          inputs:
+            Service: CloudControlApi
+            Api: UpdateResource
+            TypeName: 'AWS::EC2::Instance'
+            Identifier: '{{ Item }}'
+            PatchDocument:
+              - op: add
+                path: /Tags
+                value:
+                  - Key: deleteAt
+                    Value: '{{ deleteAt }}'
+
+  - name: ListS3Buckets
+    action: aws:executeAwsApi
+    inputs:
+      Service: s3
+      Api: ListBuckets
+    outputs:
+      - Name: bucketNames
+        Selector: '$.Buckets[*].Name'
+        Type: StringList
+
+  - name: TagAllS3Buckets
+    action: aws:forEach
+    inputs:
+      IterationSource: '{{ ListS3Buckets.bucketNames }}'
+      Steps:
+        - name: TagS3
+          action: aws:executeAwsApi
+          inputs:
+            Service: CloudControlApi
+            Api: UpdateResource
+            TypeName: 'AWS::S3::Bucket'
+            Identifier: '{{ Item }}'
+            PatchDocument:
+              - op: add
+                path: /Tags
+                value:
+                  - Key: deleteAt
+                    Value: '{{ deleteAt }}'

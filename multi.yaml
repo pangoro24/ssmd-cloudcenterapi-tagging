@@ -1,5 +1,5 @@
 schemaVersion: '0.3'
-description: Aplica el tag 'deleteAt' a todas las instancias EC2 y buckets S3 de la cuenta usando CloudControl API
+description: Aplica el tag 'deleteAt' a todas las instancias EC2 y buckets S3 usando CloudControl API
 assumeRole: '{{ AutomationAssumeRole }}'
 parameters:
   deleteAt:
@@ -9,60 +9,70 @@ parameters:
     type: String
     description: Role que asume el documento para ejecutar acciones
 mainSteps:
-  - name: ListEC2Instances
-    action: aws:executeAwsApi
+  - name: TagResourcesWithDeleteAt
+    action: aws:executeScript
     inputs:
-      Service: ec2
-      Api: DescribeInstances
-    outputs:
-      - Name: instanceIds
-        Selector: '$.Reservations[*].Instances[*].InstanceId'
-        Type: StringList
+      Runtime: python3.8
+      Handler: script_handler
+      Script: |
+        import boto3
 
-  - name: TagAllEC2Instances
-    action: aws:forEach
-    inputs:
-      IterationSource: '{{ ListEC2Instances.instanceIds }}'
-      Steps:
-        - name: TagEC2
-          action: aws:executeAwsApi
-          inputs:
-            Service: CloudControlApi
-            Api: UpdateResource
-            TypeName: 'AWS::EC2::Instance'
-            Identifier: '{{ Item }}'
-            PatchDocument:
-              - op: add
-                path: /Tags
-                value:
-                  - Key: deleteAt
-                    Value: '{{ deleteAt }}'
+        def script_handler(event, context):
+            delete_at = event['deleteAt']
+            region = boto3.session.Session().region_name
+            ec2 = boto3.client('ec2', region_name=region)
+            s3 = boto3.client('s3')
+            cloudcontrol = boto3.client('cloudcontrol', region_name=region)
 
-  - name: ListS3Buckets
-    action: aws:executeAwsApi
-    inputs:
-      Service: s3
-      Api: ListBuckets
-    outputs:
-      - Name: bucketNames
-        Selector: '$.Buckets[*].Name'
-        Type: StringList
+            # Obtener instancias EC2
+            instance_ids = []
+            reservations = ec2.describe_instances()['Reservations']
+            for res in reservations:
+                for inst in res['Instances']:
+                    instance_ids.append(inst['InstanceId'])
 
-  - name: TagAllS3Buckets
-    action: aws:forEach
-    inputs:
-      IterationSource: '{{ ListS3Buckets.bucketNames }}'
-      Steps:
-        - name: TagS3
-          action: aws:executeAwsApi
-          inputs:
-            Service: CloudControlApi
-            Api: UpdateResource
-            TypeName: 'AWS::S3::Bucket'
-            Identifier: '{{ Item }}'
-            PatchDocument:
-              - op: add
-                path: /Tags
-                value:
-                  - Key: deleteAt
-                    Value: '{{ deleteAt }}'
+            for instance_id in instance_ids:
+                try:
+                    cloudcontrol.update_resource(
+                        TypeName='AWS::EC2::Instance',
+                        Identifier=instance_id,
+                        PatchDocument=[
+                            {
+                                'op': 'add',
+                                'path': '/Tags',
+                                'value': [
+                                    {'Key': 'deleteAt', 'Value': delete_at}
+                                ]
+                            }
+                        ]
+                    )
+                except Exception as e:
+                    print(f"Error tagging EC2 instance {instance_id}: {e}")
+
+            # Obtener buckets S3
+            buckets = s3.list_buckets().get('Buckets', [])
+            for bucket in buckets:
+                bucket_name = bucket['Name']
+                try:
+                    cloudcontrol.update_resource(
+                        TypeName='AWS::S3::Bucket',
+                        Identifier=bucket_name,
+                        PatchDocument=[
+                            {
+                                'op': 'add',
+                                'path': '/Tags',
+                                'value': [
+                                    {'Key': 'deleteAt', 'Value': delete_at}
+                                ]
+                            }
+                        ]
+                    )
+                except Exception as e:
+                    print(f"Error tagging S3 bucket {bucket_name}: {e}")
+
+            return {
+                'tagged_ec2': instance_ids,
+                'tagged_s3': [b['Name'] for b in buckets]
+            }
+      InputPayload:
+        deleteAt: '{{ deleteAt }}'

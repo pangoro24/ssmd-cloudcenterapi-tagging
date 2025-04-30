@@ -1,0 +1,43 @@
+schemaVersion: '0.3'
+description: Agrega el tag 'deleteAt' a instancias EC2 y buckets S3 usando CloudControl API
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  deleteAt:
+    type: String
+    description: Valor del tag deleteAt
+  instanceId:
+    type: String
+    description: ID de la instancia EC2
+  bucketName:
+    type: String
+    description: Nombre del bucket S3
+  AutomationAssumeRole:
+    type: String
+    description: Role que asume el documento para ejecutar acciones
+mainSteps:
+  - name: TagEC2Instance
+    action: aws:executeAwsApi
+    inputs:
+      Service: CloudControlApi
+      Api: UpdateResource
+      TypeName: 'AWS::EC2::Instance'
+      Identifier: '{{ instanceId }}'
+      PatchDocument:
+        - op: add
+          path: /Tags
+          value:
+            - Key: deleteAt
+              Value: '{{ deleteAt }}'
+  - name: TagS3Bucket
+    action: aws:executeAwsApi
+    inputs:
+      Service: CloudControlApi
+      Api: UpdateResource
+      TypeName: 'AWS::S3::Bucket'
+      Identifier: '{{ bucketName }}'
+      PatchDocument:
+        - op: add
+          path: /Tags
+          value:
+            - Key: deleteAt
+              Value: '{{ deleteAt }}'

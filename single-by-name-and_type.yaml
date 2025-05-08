@@ -1,0 +1,65 @@
+schemaVersion: '0.3'
+description: Aplica el tag 'ProgrammedToDeleteAt' a un recurso específico usando CloudControl API
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  deleteAt:
+    type: String
+    description: Valor del tag ProgrammedToDeleteAt
+  resourceName:
+    type: String
+    description: Nombre o identificador del recurso (por ejemplo, nombre de bucket o ID de instancia)
+  resourceType:
+    type: String
+    allowedValues:
+      - AWS::EC2::Instance
+      - AWS::S3::Bucket
+    description: Tipo de recurso compatible (por ejemplo, AWS::EC2::Instance o AWS::S3::Bucket)
+  AutomationAssumeRole:
+    type: String
+    description: Role que asume el documento para ejecutar acciones
+mainSteps:
+  - name: TagSpecificResource
+    action: aws:executeScript
+    inputs:
+      Runtime: python3.8
+      Handler: script_handler
+      Script: |
+        import boto3
+
+        def script_handler(event, context):
+            delete_at = event['deleteAt']
+            resource_name = event['resourceName']
+            resource_type = event['resourceType']
+            region = boto3.session.Session().region_name
+            cloudcontrol = boto3.client('cloudcontrol', region_name=region)
+
+            try:
+                cloudcontrol.update_resource(
+                    TypeName=resource_type,
+                    Identifier=resource_name,
+                    PatchDocument=[
+                        {
+                            'op': 'add',
+                            'path': '/Tags',
+                            'value': [
+                                {'Key': 'ProgrammedToDeleteAt', 'Value': delete_at}
+                            ]
+                        }
+                    ]
+                )
+                return {
+                    'status': 'success',
+                    'resource': resource_name,
+                    'type': resource_type
+                }
+            except Exception as e:
+                return {
+                    'status': 'failed',
+                    'error': str(e),
+                    'resource': resource_name,
+                    'type': resource_type
+                }
+      InputPayload:
+        deleteAt: '{{ deleteAt }}'
+        resourceName: '{{ resourceName }}'
+        resourceType: '{{ resourceType }}'

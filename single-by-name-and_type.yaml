@@ -25,6 +25,7 @@ mainSteps:
       Handler: script_handler
       Script: |
         import boto3
+        import json
 
         def script_handler(event, context):
             delete_at = event['deleteAt']
@@ -34,23 +35,48 @@ mainSteps:
             cloudcontrol = boto3.client('cloudcontrol', region_name=region)
 
             try:
+                # Paso 1: obtener el recurso actual
+                response = cloudcontrol.get_resource(
+                    TypeName=resource_type,
+                    Identifier=resource_name
+                )
+                resource_description = response.get('ResourceDescription', {})
+                properties = json.loads(resource_description.get('Properties', '{}'))
+
+                # Paso 2: obtener y preservar los tags existentes
+                existing_tags = properties.get('Tags', [])
+                user_tags = [t for t in existing_tags if not t['Key'].startswith('aws:')]
+
+                # Paso 3: actualizar o agregar el tag ProgrammedToDeleteAt
+                updated = False
+                for tag in user_tags:
+                    if tag['Key'] == 'ProgrammedToDeleteAt':
+                        tag['Value'] = delete_at
+                        updated = True
+                        break
+                if not updated:
+                    user_tags.append({'Key': 'ProgrammedToDeleteAt', 'Value': delete_at})
+
+                # Paso 4: aplicar el nuevo conjunto de tags
+                patch_document = [
+                    {
+                        'op': 'replace' if existing_tags else 'add',
+                        'path': '/Tags',
+                        'value': user_tags
+                    }
+                ]
+
                 cloudcontrol.update_resource(
                     TypeName=resource_type,
                     Identifier=resource_name,
-                    PatchDocument=[
-                        {
-                            'op': 'add',
-                            'path': '/Tags',
-                            'value': [
-                                {'Key': 'ProgrammedToDeleteAt', 'Value': delete_at}
-                            ]
-                        }
-                    ]
+                    PatchDocument=patch_document
                 )
+
                 return {
                     'status': 'success',
                     'resource': resource_name,
-                    'type': resource_type
+                    'type': resource_type,
+                    'applied_tags': user_tags
                 }
             except Exception as e:
                 return {

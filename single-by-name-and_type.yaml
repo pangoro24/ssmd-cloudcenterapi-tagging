@@ -35,29 +35,28 @@ mainSteps:
             cloudcontrol = boto3.client('cloudcontrol', region_name=region)
 
             try:
-                # Paso 1: obtener el recurso actual
+                # Paso 1: Obtener el recurso actual
                 response = cloudcontrol.get_resource(
                     TypeName=resource_type,
                     Identifier=resource_name
                 )
-                resource_description = response.get('ResourceDescription', {})
-                properties = json.loads(resource_description.get('Properties', '{}'))
+                properties = json.loads(response.get('ResourceDescription', {}).get('Properties', '{}'))
 
-                # Paso 2: obtener y preservar los tags existentes
+                # Paso 2: Obtener los tags existentes y filtrar los que no se pueden modificar (aws:)
                 existing_tags = properties.get('Tags', [])
-                user_tags = [t for t in existing_tags if not t['Key'].startswith('aws:')]
+                user_tags = [tag for tag in existing_tags if not tag['Key'].lower().startswith('aws:')]
 
-                # Paso 3: actualizar o agregar el tag ProgrammedToDeleteAt
-                updated = False
+                # Paso 3: Actualizar o agregar el tag ProgrammedToDeleteAt
+                tag_exists = False
                 for tag in user_tags:
                     if tag['Key'] == 'ProgrammedToDeleteAt':
                         tag['Value'] = delete_at
-                        updated = True
+                        tag_exists = True
                         break
-                if not updated:
+                if not tag_exists:
                     user_tags.append({'Key': 'ProgrammedToDeleteAt', 'Value': delete_at})
 
-                # Paso 4: aplicar el nuevo conjunto de tags
+                # Paso 4: Aplicar patch sin incluir tags aws:
                 patch_document = [
                     {
                         'op': 'replace' if existing_tags else 'add',
@@ -76,8 +75,9 @@ mainSteps:
                     'status': 'success',
                     'resource': resource_name,
                     'type': resource_type,
-                    'applied_tags': user_tags
+                    'tags_applied': user_tags
                 }
+
             except Exception as e:
                 return {
                     'status': 'failed',
